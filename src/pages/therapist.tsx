@@ -8,7 +8,8 @@ import { useStore } from "../store";
 import api from "../lib/api";
 import { useApi, usePoll } from "../lib/useApi";
 import {
-  bookingServiceName, bookingSlotLabel, fmtDate, fmtDateFull, fmtINR, fmtWhen, idOf, isoDay, nameOf, patientFlags, statusKey,
+  addClinicDays, bookingServiceName, bookingSlotLabel, dayKeyDate, fmtDate,
+  fmtDateFull, fmtDayKey, fmtINR, fmtWhen, idOf, isoDay, nameOf, patientFlags, statusKey,
 } from "../lib/format";
 import { STATUS } from "../ui";
 import type { Booking, BookingSession, Inventory, ServiceCard } from "../lib/types";
@@ -34,11 +35,16 @@ export function Floor() {
   const nav = useNavigate();
   const { toast, audit, branch, admin } = useStore();
   const [day, setDay] = useState(isoDay());
+  const liveDay = useRef(isoDay());
   // A tablet left open overnight should roll over to the new day by itself.
   useEffect(() => {
-    const t = window.setInterval(() => { if (day === isoDay(new Date(Date.now() - 86400000))) setDay(isoDay()); }, 60000);
+    const t = window.setInterval(() => {
+      const current = isoDay();
+      setDay((selected) => selected === liveDay.current ? current : selected);
+      liveDay.current = current;
+    }, 60000);
     return () => window.clearInterval(t);
-  }, [day]);
+  }, []);
 
   const q = useFloor(branch, day);
   usePoll(q.reload, 20000);
@@ -770,16 +776,15 @@ export function Summary() {
 export function Schedule() {
   const { admin, branch } = useStore();
   const [weekStart, setWeekStart] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); // Monday
-    d.setHours(0, 0, 0, 0);
+    const d = dayKeyDate(isoDay());
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); // Monday
     return d;
   });
 
   const days = useMemo(
     () => Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
-      d.setDate(weekStart.getDate() + i);
+      d.setUTCDate(weekStart.getUTCDate() + i);
       return d;
     }),
     [weekStart],
@@ -802,8 +807,7 @@ export function Schedule() {
   // plus service-card rows written in my name.
   const mySessions = useApi(async () => {
     if (!admin?._id) return [] as Booking[];
-    const from = new Date(); from.setDate(from.getDate() - 60);
-    const res = await api.bookings.list({ therapistId: admin._id, startDate: isoDay(from), limit: 100 });
+    const res = await api.bookings.list({ therapistId: admin._id, startDate: addClinicDays(isoDay(), -60), limit: 100 });
     return res.data ?? [];
   }, [admin?._id]);
   const cards = useApi(() => api.serviceCards.list({ limit: 100 }).catch(() => ({ data: [] as ServiceCard[] })), []);
@@ -826,7 +830,7 @@ export function Schedule() {
 
   const shift = (weeks: number) => setWeekStart((d) => {
     const next = new Date(d);
-    next.setDate(d.getDate() + weeks * 7);
+    next.setUTCDate(d.getUTCDate() + weeks * 7);
     return next;
   });
 
@@ -853,7 +857,7 @@ export function Schedule() {
                 const completed = d.bookings.filter((b) => b.status === "Completed").length;
                 const pending = d.bookings.filter((b) => ["Confirmed", "In Progress", "Awaiting Confirmation"].includes(b.status)).length;
                 return [
-                  <B key={d.date.toISOString()}>{d.date.toLocaleDateString("en-GB", { weekday: "short" })}</B>,
+                  <B key={d.date.toISOString()}>{fmtDayKey(isoDay(d.date), { weekday: "short" })}</B>,
                   isoDay(d.date) === today ? <Tag key={`${d.date}t`} kind="info">{fmtDate(d.date)} · today</Tag> : fmtDate(d.date),
                   d.bookings.length,
                   completed,
