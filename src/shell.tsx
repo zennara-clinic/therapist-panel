@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useStore, ROLE_LABEL, panelAccepts, wrongPanelMessage, type Role } from "./store";
+import { replayTour } from "./tours";
 import { Menu, Modal } from "./ui";
 import api from "./lib/api";
 import { useApi, useDebounced, usePoll } from "./lib/useApi";
@@ -206,6 +207,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 { label: <span><b>{who.name}</b><br /><span className="text-[11px] text-ink3">{who.role}{branch ? ` · ${branch}` : ""}</span></span> },
                 { label: "My schedule", onClick: () => nav("/floor/schedule") },
                 { label: "Change password", onClick: () => setPwOpen(true) },
+                { label: "View tutorial again", onClick: () => { replayTour(); toast("Starting the walkthrough"); } },
                 { label: "Sign out", onClick: () => { logout(); toast("Signed out"); } },
               ]}
             />

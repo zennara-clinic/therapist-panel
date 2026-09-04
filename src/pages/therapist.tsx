@@ -221,6 +221,79 @@ type LineItem = {
   billable: boolean;
 };
 
+
+/**
+ * Before / after photographs from the treatment room.
+ *
+ * The same record the dermatologist's panel writes to, so the doctor sees the
+ * therapist's "after" shots next to their own "before" ones in one timeline.
+ * `capture="environment"` opens the tablet's camera directly; on a desktop it
+ * is an ordinary file picker.
+ */
+function SessionPhotos({ userId, bookingId }: { userId: string; bookingId?: string | null }) {
+  const { toast } = useStore();
+  const [phase, setPhase] = useState<"before" | "during" | "after">("before");
+  const [area, setArea] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const photos = useApi(
+    () => (userId ? api.patientPhotos.list({ userId, limit: 60 }).then((r) => r.data ?? []) : Promise.resolve([])),
+    [userId, nonce],
+  );
+
+  const send = async (files: FileList | null) => {
+    if (!files?.length || !userId) return;
+    setBusy(true);
+    try {
+      await api.patientPhotos.upload(Array.from(files), { userId, bookingId: bookingId ?? null, phase, bodyArea: area.trim() });
+      toast(files.length === 1 ? "Photograph saved" : `${files.length} photographs saved`);
+      setArea(""); setNonce((n) => n + 1);
+    } catch (e) { toast((e as Error).message); }
+    finally { setBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+
+  const groups = [["before", "Before"], ["during", "During"], ["after", "After"]] as const;
+
+  return (
+    <div className="mb-3.5 rounded-lg border border-border bg-surface px-3.5 py-3">
+      <div className="font-mono text-[9.5px] font-bold uppercase tracking-[0.13em] text-ink3">Photographs</div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        {groups.map(([key, label]) => (
+          <button key={key} onClick={() => setPhase(key)}
+            className={`rounded-lg px-2.5 py-1.5 text-[11.5px] font-bold ${phase === key ? "bg-primary text-white" : "border border-border bg-surface text-ink2"}`}>
+            {label}
+          </button>
+        ))}
+        <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Area (e.g. upper lip)"
+          className="min-w-[140px] flex-1 rounded-lg border border-border bg-ivory px-2.5 py-1.5 text-[11.5px] outline-none focus:border-gold-dark" />
+      </div>
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple disabled={busy || !userId}
+        onChange={(e) => send(e.target.files)}
+        className="mt-2 block w-full text-[11.5px] file:mr-2 file:rounded-lg file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-[11.5px] file:font-bold file:text-white" />
+      {busy && <div className="mt-1 text-[11.5px] text-ink3">Uploading…</div>}
+      {groups.map(([key, label]) => {
+        const rows = (photos.data ?? []).filter((ph) => ph.phase === key);
+        if (!rows.length) return null;
+        return (
+          <div key={key} className="mt-2">
+            <div className="mb-1 text-[10.5px] font-bold uppercase tracking-wider text-ink3">{label} · {rows.length}</div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {rows.map((ph) => (
+                <a key={ph._id} href={ph.url} target="_blank" rel="noreferrer" className="relative overflow-hidden rounded-lg border border-border">
+                  <img src={ph.url} alt={ph.bodyArea || label} className="h-20 w-full object-cover" />
+                  <span className="absolute inset-x-0 bottom-0 bg-black/55 px-1.5 py-0.5 text-[9px] text-white">{fmtDate(ph.takenAt)}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Session() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -478,6 +551,8 @@ export function Session() {
               </div>
             );
           })()}
+
+          <SessionPhotos userId={userId} bookingId={bookingId} />
 
           <SecH t="Billable to the guest" em="· goes to reception"
             right={<span className="font-mono text-[11px] text-ink3">rate × quantity</span>} />
