@@ -15,8 +15,6 @@ export type Admin = {
   branchId?: Id | null;
   /** Centres this therapist works at. */
   branchIds?: Id[];
-  /** True once a password is set (from /admin/auth/me). */
-  hasPassword?: boolean;
   isActive: boolean;
   lastLogin?: string;
   /** Explicit link to a Doctor profile for role `doctor` logins. */
