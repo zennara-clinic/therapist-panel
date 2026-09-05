@@ -218,35 +218,13 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 /* ================= login ================= */
-const LICONS: Record<string, ReactNode> = {
-  cal: <CalendarDays className="h-8 w-8 text-gold" />, app: <Smartphone className="h-8 w-8 text-gold" />,
-  stock: <Boxes className="h-8 w-8 text-gold" />, stet: <Stethoscope className="h-8 w-8 text-gold" />,
-  mic: <Mic className="h-8 w-8 text-gold" />, rx: <Pill className="h-8 w-8 text-gold" />,
-  spa: <Sparkles className="h-8 w-8 text-gold" />, bottle: <FlaskConical className="h-8 w-8 text-gold" />,
-  bill: <Receipt className="h-8 w-8 text-gold" />,
-};
-
-const SLIDES = [
-  { icon: "spa", title: "Your floor, on one tablet", lines: ["Today’s guests the moment you sign in", "Amber cards are always your next action", "Sessions start with the guest’s check-in code"] },
-  { icon: "bottle", title: "Steppers log exact usage", lines: ["Billable items go to the guest’s bill", "Clinic supplies tracked as cost-only", "Batch and expiry come with each pick"] },
-  { icon: "bill", title: "Finish at the front desk", lines: ["COMPLETE deducts stock automatically", "The service card writes itself", "The bill reaches reception before the guest"] },
-  { icon: "cal", title: "My schedule, always current", lines: ["This week at your centre", "A log of every session you completed", "All in one place"] },
-];
-
 function LoginPage({ onSignedIn }: { onSignedIn: (token: string, admin: Admin, expiresAt?: string) => void }) {
-  const [slide, setSlide] = useState(0);
   const [step, setStep] = useState<"email" | "otp">("email");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    const t = setInterval(() => setSlide((x) => (x + 1) % SLIDES.length), 4200);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -256,122 +234,74 @@ function LoginPage({ onSignedIn }: { onSignedIn: (token: string, admin: Admin, e
 
   const fail = (err: unknown) =>
     setError(err instanceof ApiError ? err.message : (err as Error)?.message ?? "Something went wrong");
+  const addr = email.trim().toLowerCase();
 
   const sendOtp = async () => {
-    const addr = email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(addr)) { setError("Enter a valid email address"); return; }
-    setBusy(true); setError(null); setNotice(null);
-    try {
-      await api.auth.requestOtp(addr);
-      setStep("otp");
-      setCooldown(30);
-      setNotice(`We emailed a 6-digit code to ${addr}.`);
-    } catch (err) { fail(err); } finally { setBusy(false); }
+    setBusy(true); setError(null);
+    try { await api.auth.requestOtp(addr); setStep("otp"); setCooldown(30); }
+    catch (err) { fail(err); } finally { setBusy(false); }
   };
 
   const resend = async () => {
     setBusy(true); setError(null);
-    try {
-      await api.auth.resendOtp(email.trim().toLowerCase());
-      setCooldown(30);
-      setNotice("A new code is on its way.");
-    } catch (err) { fail(err); } finally { setBusy(false); }
+    try { await api.auth.resendOtp(addr); setCooldown(30); }
+    catch (err) { fail(err); } finally { setBusy(false); }
   };
 
   const verify = async () => {
     if (otp.length !== 6) { setError("The code is 6 digits"); return; }
     setBusy(true); setError(null);
     try {
-      const res = await api.auth.verifyOtp(email.trim().toLowerCase(), otp);
+      const res = await api.auth.verifyOtp(addr, otp);
       if (!panelAccepts(res.admin.role)) { setError(wrongPanelMessage(res.admin.role)); setOtp(""); return; }
       onSignedIn(res.token, res.admin, res.expiresAt);
     } catch (err) { fail(err); setOtp(""); } finally { setBusy(false); }
   };
 
-  const sl = SLIDES[slide];
+  // One quiet column on the clinic green: the white logo above a plain card.
+  // No carousel, no notice bubbles, no footer copy — the field and the button.
+  const field = "w-full rounded-xl border border-border bg-ivory px-4 py-3 text-[14px] text-ink outline-none transition-colors placeholder:text-ink3/60 focus:border-primary focus:bg-surface";
+  const primary = "flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-[14px] font-bold text-white transition-colors hover:bg-primary-hover disabled:bg-dis-bg disabled:text-dis";
 
   return (
-    <div className="grid min-h-screen md:grid-cols-2">
-      <div className="relative hidden flex-col justify-between overflow-hidden bg-side p-10 md:flex">
-        <img src={logo} alt="Zennara" className="h-28 w-auto self-start object-contain" />
-        <div className="relative">
-          <div className="overflow-hidden">
-            <div className="flex transition-transform duration-700 ease-out" style={{ transform: `translateX(-${slide * 100}%)` }}>
-              {SLIDES.map((s) => (
-                <div key={s.title} className="w-full shrink-0 pr-6">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-side-2">{LICONS[s.icon]}</div>
-                  <h2 className="mt-5 max-w-[420px] text-[30px] font-extrabold leading-tight text-white">{s.title}</h2>
-                  <div className="mt-4 grid gap-2.5">
-                    {s.lines.map((l) => (
-                      <div key={l} className="flex items-center gap-2.5 text-[14.5px] text-side-ink">
-                        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-gold text-[10px] font-extrabold text-primary">✓</span>{l}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="mt-8 flex gap-2">
-            {SLIDES.map((_, i) => (
-              <button key={i} onClick={() => setSlide(i)} aria-label={`Slide ${i + 1}`}
-                className={`h-1.5 rounded-full transition-all ${i === slide ? "w-7 bg-gold" : "w-2.5 bg-side-2 hover:bg-side-mut"}`} />
-            ))}
-          </div>
-        </div>
-        <div className="text-[11.5px] uppercase tracking-[0.2em] text-gold">Skin · Aesthetics · Wellness</div>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-side px-6 py-12">
+      <div className="w-full max-w-[380px]">
+        <img src={logo} alt="Zennara" className="mx-auto h-20 w-auto object-contain" />
+        <div className="mt-8 rounded-3xl bg-surface p-8 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.45)]">
+          <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-ink3">Therapist panel</div>
+          <h1 className="mt-1.5 text-[24px] font-extrabold leading-tight tracking-tight text-ink">
+            {step === "email" ? "Sign in" : "Enter your code"}
+          </h1>
+          <p className="mt-1 text-[13px] text-ink3">
+            {step === "email" ? "We’ll email you a one-time code." : <>Sent to <span className="font-semibold text-ink2">{addr}</span></>}
+          </p>
 
-      <div className="flex flex-col items-center justify-center bg-bg p-8">
-        <div className="w-full max-w-[400px]">
-          <div className="mx-auto mb-4 grid w-fit place-items-center rounded-2xl bg-side px-6 py-4 md:hidden">
-            <img src={logo} alt="Zennara" className="h-24 w-auto object-contain" />
-          </div>
-          <div className="mb-5 flex items-center gap-3">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-side">
-              <LayoutDashboard className="h-6 w-6 text-gold" />
-            </span>
-            <div>
-              <h1 className="text-[22px] font-extrabold leading-tight tracking-tight">Zennara Therapist</h1>
-              <div className="text-[12.5px] text-ink3">
-                {step === "email" ? "Sign in with your email — we send a code" : "Enter the code we emailed you"}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-2xl border border-border bg-surface p-5 shadow-[0_4px_16px_rgba(3,47,34,0.05)]">
+          <div className="mt-6 grid gap-3">
             {step === "email" ? (
               <>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-ink2" htmlFor="login-email">Email</label>
-                  <input id="login-email" autoFocus value={email} type="email" autoComplete="email"
-                    onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !busy && sendOtp()}
-                    placeholder="you@zennara.in"
-                    className="rounded-lg border border-border bg-ivory px-3 py-2.5 text-[13.5px] outline-none focus:border-gold-dark" />
-                </div>
-                <button onClick={sendOtp} disabled={busy}
-                  className="mt-1 flex items-center justify-center gap-2 rounded-(--radius-btn) bg-primary py-3 text-[14px] font-bold text-white transition-colors hover:bg-primary-hover disabled:bg-dis-bg disabled:text-dis">
-                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Send code
+                <input id="login-email" autoFocus value={email} type="email" autoComplete="email" aria-label="Email"
+                  onChange={(e) => { setEmail(e.target.value); setError(null); }}
+                  onKeyDown={(e) => e.key === "Enter" && !busy && sendOtp()}
+                  placeholder="you@zennara.in" className={field} />
+                <button onClick={sendOtp} disabled={busy} className={primary}>
+                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Continue
                 </button>
               </>
             ) : (
               <>
-                <div className="flex flex-col gap-1">
-                  <label className="text-[11px] font-bold text-ink2" htmlFor="login-otp">6-digit code</label>
-                  <input id="login-otp" autoFocus value={otp} inputMode="numeric" maxLength={6} autoComplete="one-time-code"
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                    onKeyDown={(e) => e.key === "Enter" && !busy && verify()}
-                    placeholder="••••••"
-                    className="rounded-xl border-2 border-border bg-ivory px-4 py-3 text-center font-mono text-[22px] font-bold tracking-[0.5em] outline-none focus:border-gold-dark" />
-                </div>
-                <button onClick={verify} disabled={busy || otp.length !== 6}
-                  className="mt-1 flex items-center justify-center gap-2 rounded-(--radius-btn) bg-primary py-3 text-[14px] font-bold text-white transition-colors hover:bg-primary-hover disabled:bg-dis-bg disabled:text-dis">
-                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Verify &amp; sign in
+                <input id="login-otp" autoFocus value={otp} inputMode="numeric" maxLength={6} autoComplete="one-time-code" aria-label="6-digit code"
+                  onChange={(e) => { setOtp(e.target.value.replace(/\D/g, "")); setError(null); }}
+                  onKeyDown={(e) => e.key === "Enter" && !busy && verify()}
+                  placeholder="······"
+                  className={`${field} text-center font-mono text-[24px] font-bold tracking-[0.45em]`} />
+                <button onClick={verify} disabled={busy || otp.length !== 6} className={primary}>
+                  {busy && <Loader2 className="h-4 w-4 animate-spin" />} Sign in
                 </button>
-                <div className="flex items-center justify-between text-[12px]">
-                  <button className="font-semibold text-ink3 hover:text-ink"
-                    onClick={() => { setStep("email"); setOtp(""); setError(null); setNotice(null); }}>
-                    ← Change email
+                <div className="flex items-center justify-between pt-1 text-[12.5px]">
+                  <button className="font-semibold text-ink3 transition-colors hover:text-ink"
+                    onClick={() => { setStep("email"); setOtp(""); setError(null); }}>
+                    Use another email
                   </button>
                   <button className="font-semibold text-primary disabled:text-dis" disabled={busy || cooldown > 0} onClick={resend}>
                     {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
@@ -379,15 +309,8 @@ function LoginPage({ onSignedIn }: { onSignedIn: (token: string, admin: Admin, e
                 </div>
               </>
             )}
-
-            {notice && !error && <div className="rounded-lg bg-ok-bg px-3 py-2 text-[12px] text-ok">{notice}</div>}
-            {error && <div className="rounded-lg bg-err-bg px-3 py-2 text-[12px] font-semibold text-err">{error}</div>}
+            {error && <p role="alert" className="text-[12.5px] font-semibold text-err">{error}</p>}
           </div>
-
-          <p className="mt-4 text-center text-[11.5px] leading-relaxed text-ink3">
-            This panel is for therapist accounts.<br />
-            A 6-digit code is emailed to you each time you sign in — there is no password.
-          </p>
         </div>
       </div>
     </div>
