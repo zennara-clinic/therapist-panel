@@ -4,6 +4,7 @@ import { Shell, HOME } from "./shell";
 import { Tours } from "./tours";
 import { ErrorBoundary } from "./lib/ErrorBoundary";
 import { Floor, Session, Summary, Schedule } from "./pages/therapist";
+import { MyProfile } from "./pages/profile";
 
 /**
  * One boundary per route, keyed on the path so navigating away from a screen
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/floor/session" element={page(<Session />)} />
           <Route path="/floor/summary" element={page(<Summary />)} />
           <Route path="/floor/schedule" element={page(<Schedule />)} />
+          <Route path="/floor/profile" element={page(<MyProfile />)} />
 
           <Route path="*" element={<Navigate to={HOME} replace />} />
         </Routes>

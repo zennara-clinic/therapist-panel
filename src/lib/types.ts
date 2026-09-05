@@ -11,6 +11,10 @@ export type Admin = {
   name: string;
   role: AdminRole;
   phone?: string | null;
+  /** Profile photo (S3 URL) shown in the top bar. */
+  photo?: string | null;
+  /** Display name of the account's role (super admins: "Super Admin"). */
+  roleName?: string | null;
   /** Home centre for floor staff — pins the panel to it. */
   branchId?: Id | null;
   /** Centres this therapist works at. */
