@@ -6,6 +6,9 @@ export type Id = string;
 /** Three roles, three panels. Finer-grained admin permissions come later. */
 export type AdminRole = "super_admin" | "doctor" | "therapist";
 export type Admin = {
+  /** True after an admin-issued temporary password until the person picks their own. */
+  mustChangePassword?: boolean;
+  hasPassword?: boolean;
   _id: Id;
   email: string;
   name: string;
