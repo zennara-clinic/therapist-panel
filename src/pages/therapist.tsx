@@ -55,92 +55,73 @@ export function Floor() {
   // when plans change mid-shift.
   const mine = (b: Booking) => b.assignedTherapistId === admin?._id;
   const rows = [...all].sort((a, b) => Number(mine(b)) - Number(mine(a)));
-  const waiting = rows.filter((b) => b.status === "Confirmed" || b.status === "Rescheduled");
+  // A guest reception has already checked in is waiting for a therapist, not
+  // gone: they belong at the top of the floor list, not nowhere.
+  const waiting = rows.filter((b) => ["Confirmed", "Rescheduled", "Checked In"].includes(b.status));
   const inProgress = rows.filter((b) => b.status === "In Progress");
   const done = rows.filter((b) => b.status === "Completed");
   const myWaiting = waiting.filter(mine);
 
-  // Check-in is OTP-gated: the guest reads the code from their app. Same
-  // system as reception — send/resend the code, or manual with a reason.
-  const [otpFor, setOtpFor] = useState<Booking | null>(null);
-  const [code, setCode] = useState("");
+  /*
+   * Starting a session on the floor.
+   *
+   * The guest may already be checked in by reception, or may have walked
+   * straight through to the room. Either way the therapist taps one card and
+   * the visit ends up In Progress: check the guest in if needed, then start.
+   * The check-in window still applies — an early start asks the therapist why,
+   * and that reason is recorded on the appointment.
+   */
+  const [early, setEarly] = useState<{ booking: Booking; message: string } | null>(null);
+  const [earlyReason, setEarlyReason] = useState("");
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpErr, setOtpErr] = useState<string | null>(null);
-  const [manualIn, setManualIn] = useState(false);
-  const [manualInReason, setManualInReason] = useState("");
-  const [sendBusy, setSendBusy] = useState(false);
 
-  const sendCode = async (b: Booking, kind: "checkin" | "checkout", channel: "email" | "whatsapp" | "both") => {
-    setSendBusy(true);
+  const openSession = (id: string) => nav("/floor/session", { state: { bookingId: id } });
+
+  const beginSession = async (b: Booking, force?: { reason: string }) => {
+    setOtpBusy(true); setOtpErr(null);
     try {
-      const r = await api.bookings.sendVisitCode(b._id, { kind, channel });
-      const sent = (r.delivered ?? []).join(" + ");
-      toast(sent ? `Code sent via ${sent}` : "Could not deliver the code — try another channel");
-    } catch (e) { toast((e as Error).message); } finally { setSendBusy(false); }
+      if (b.status === "Confirmed" || b.status === "Rescheduled") {
+        await api.bookings.lifecycle(b._id, { action: "check_in", ...(force ? { force: true, reason: force.reason } : {}) });
+        audit("BOOKING_CHECKED_IN", `${b.fullName} · floor${force ? " · early" : ""}`, { bookingId: b._id });
+      }
+      await api.bookings.lifecycle(b._id, { action: "start" });
+      toast(`${b.fullName} — session started`);
+      setEarly(null); setEarlyReason(""); q.reload();
+      openSession(b._id);
+    } catch (e) {
+      const err = e as Error & { code?: string; meta?: unknown };
+      // Too early: offer the override rather than a dead end, since the
+      // therapist is standing in front of the guest.
+      if (err.code === "CHECKIN_TOO_EARLY") { setEarly({ booking: b, message: err.message }); setEarlyReason(""); }
+      else if (early) setOtpErr(err.message);
+      else toast(err.message);
+    } finally { setOtpBusy(false); }
   };
 
   const startSession = (b: Booking) => {
-    if (b.status === "In Progress") { nav("/floor/session", { state: { bookingId: b._id } }); return; }
-    if (b.status === "Confirmed" || b.status === "Rescheduled") { setCode(""); setOtpErr(null); setOtpFor(b); return; }
+    if (b.status === "In Progress") { openSession(b._id); return; }
+    if (["Confirmed", "Rescheduled", "Checked In"].includes(b.status)) { void beginSession(b); return; }
     toast(`${b.fullName} is ${b.status.toLowerCase()} — reception needs to confirm before a session can start.`);
-  };
-
-  const confirmCheckIn = async () => {
-    if (!otpFor) return;
-    setOtpBusy(true); setOtpErr(null);
-    try {
-      if (manualIn) {
-        if (manualInReason.trim().length < 3) throw new Error("A reason is required to check in without a code.");
-        await api.bookings.manualCheckIn(otpFor._id, manualInReason.trim());
-      } else {
-        await api.bookings.verifyCheckIn(otpFor._id, code);
-      }
-      audit("BOOKING_CHECKED_IN", `${otpFor.fullName} · floor${manualIn ? " · manual" : ""}`, { bookingId: otpFor._id });
-      toast(`${otpFor.fullName} checked in — session started`);
-      const id = otpFor._id;
-      setOtpFor(null); setManualIn(false); setManualInReason(""); q.reload();
-      nav("/floor/session", { state: { bookingId: id } });
-    } catch (e) { setOtpErr((e as Error).message); } finally { setOtpBusy(false); }
   };
 
   return (
     <Page title="Floor" sub={[admin?.name, branch || "All centres", fmtDateFull(day)].filter(Boolean).join(" · ")}
       actions={<input type="date" value={day} onChange={(e) => setDay(e.target.value)}
         className="rounded-(--radius-btn) border border-border bg-surface px-3 py-1.5 text-[12.5px] outline-none focus:border-gold-dark" />}>
-      <Modal open={!!otpFor} onClose={() => { setOtpFor(null); setManualIn(false); setManualInReason(""); }}
-        title={`Check in ${otpFor?.fullName ?? ""} — guest code`}>
-        {!manualIn ? (
-          <>
-            <Note>Ask the guest for the 6-digit check-in code on their Zennara appointment screen. Don&rsquo;t have it? Resend it below.</Note>
-            <div className="mt-3"><Otp value={code} onChange={setCode} length={6} /></div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
-              <span className="text-ink3">Resend code:</span>
-              <Btn kind="ghost" className="!px-2.5 !py-1 !text-[11.5px]" disabled={sendBusy}
-                onClick={() => otpFor && sendCode(otpFor, "checkin", "email")}>Email</Btn>
-              <Btn kind="ghost" className="!px-2.5 !py-1 !text-[11.5px]" disabled={sendBusy}
-                onClick={() => otpFor && sendCode(otpFor, "checkin", "whatsapp")}>WhatsApp</Btn>
-              <button className="ml-auto text-[11.5px] font-semibold text-ink3 underline-offset-2 hover:underline"
-                onClick={() => { setManualIn(true); setOtpErr(null); }}>
-                Guest can&rsquo;t receive a code?
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <Note kind="crit">Manual check-in is recorded against your name on the booking and in the audit log — the guest is notified they were checked in without a code.</Note>
-            <div className="mt-3">
-              <Area label="Reason (required)" value={manualInReason} onChange={setManualInReason} rows={2}
-                placeholder="e.g. No phone with them, email bouncing" />
-            </div>
-            <button className="mt-2 text-[11.5px] font-semibold text-ink3 underline-offset-2 hover:underline"
-              onClick={() => { setManualIn(false); setOtpErr(null); }}>← Back to code entry</button>
-          </>
-        )}
+      <Modal open={!!early} onClose={() => { setEarly(null); setEarlyReason(""); }}
+        title={`Start ${early?.booking.fullName ?? ""} early`}>
+        <Note kind="crit">{early?.message} Starting now is recorded against your name on the appointment.</Note>
+        <div className="mt-3">
+          <Area label="Reason (required)" value={earlyReason} onChange={setEarlyReason} rows={2}
+            placeholder="e.g. guest arrived early and the room is free" />
+        </div>
         {otpErr && <Note kind="crit" className="mt-3">{otpErr}</Note>}
         <div className="mt-4 flex justify-end gap-2">
-          <Btn kind="ghost" onClick={() => { setOtpFor(null); setManualIn(false); setManualInReason(""); }}>Back</Btn>
-          <Btn disabled={otpBusy || (manualIn ? manualInReason.trim().length < 3 : code.length < 6)} onClick={confirmCheckIn}>
-            {otpBusy ? "Checking…" : manualIn ? "Check in without code" : "Check in & start"}
+          <Btn kind="ghost" onClick={() => { setEarly(null); setEarlyReason(""); }}>Back</Btn>
+          <Btn disabled={otpBusy || earlyReason.trim().length < 3}
+            onClick={() => early && beginSession(early.booking, { reason: earlyReason.trim() })}>
+            {otpBusy ? "Starting…" : "Start anyway"}
           </Btn>
         </div>
       </Modal>
@@ -368,31 +349,21 @@ export function Session() {
   const consumedRef = useRef(false);
   const cardRef = useRef(false);
 
-  // Check-out is the same code-gated system reception uses: the guest reads
-  // their 6-digit check-out code from the app, or staff go manual with a
-  // recorded reason. The modal collects that; finishSession does the work.
+  /*
+   * Completing a session is one confirmation, not a code exchange.
+   *
+   * The therapist is the person who knows the treatment finished, so they say
+   * so; reception bills from the structured session this writes. The modal
+   * exists to make the guest's bill visible before it is sent, not to collect
+   * a secret.
+   */
   const [outOpen, setOutOpen] = useState(false);
-  const [outCode, setOutCode] = useState("");
-  const [outManual, setOutManual] = useState(false);
-  const [outReason, setOutReason] = useState("");
-  const [sendBusy, setSendBusy] = useState(false);
-
-  const sendOutCode = async (channel: "email" | "whatsapp") => {
-    if (!booking.data) return;
-    setSendBusy(true);
-    try {
-      const r = await api.bookings.sendVisitCode(booking.data._id, { kind: "checkout", channel });
-      const sent = (r.delivered ?? []).join(" + ");
-      toast(sent ? `Check-out code sent via ${sent}` : "Could not deliver the code — try another channel");
-    } catch (e) { toast((e as Error).message); } finally { setSendBusy(false); }
-  };
 
   const complete = () => {
     setErr(null);
     if (!booking.data) return;
-    if (booking.data.status !== "In Progress") { setErr("The guest is not checked in — check them in from the floor first."); return; }
+    if (booking.data.status !== "In Progress") { setErr("The session hasn't started — start it from the floor first."); return; }
     if (overStock.length) { setErr(`Not enough on hand: ${overStock.map((x) => x.name).join(", ")}`); return; }
-    setOutCode(""); setOutManual(false); setOutReason("");
     setOutOpen(true);
   };
 
@@ -401,11 +372,9 @@ export function Session() {
     setBusy(true); setErr(null);
     try {
       const bk = booking.data;
-      if (bk.status !== "In Progress") throw new Error("The guest is not checked in — check them in from the floor first.");
+      if (bk.status !== "In Progress") throw new Error("The session hasn't started — start it from the floor first.");
       const usedLine = items.filter((x) => x.qty > 0);
       if (overStock.length) throw new Error(`Not enough on hand: ${overStock.map((x) => x.name).join(", ")}`);
-      if (outManual && outReason.trim().length < 3) throw new Error("A reason is required to check out without a code.");
-      if (!outManual && outCode.length !== 6) throw new Error("The check-out code is 6 digits.");
 
       // 1. Take the consumed quantities out of stock — atomically, per line,
       //    with a ledger row each. Refused (not clamped) if something ran out
@@ -457,25 +426,21 @@ export function Session() {
             billable.length ? `Billable items ${fmtINR(productTotal)}` : "",
           ].filter(Boolean).join(" | ") || null,
         });
-        cardRef.current = true; // a wrong code retry must not write a second card entry
+        cardRef.current = true; // a retry after a failure must not write a second card entry
       }
 
-      // 3. Check the guest out with the structured session — reception bills
-      //    from this. Code-verified like reception, or manual with a reason.
+      // 3. Complete the visit with the structured session — reception bills
+      //    from this, and Zenoti records the service as closed.
       const session: BookingSession = {
         items: usedLine.map((x) => ({ inventoryId: x.inventoryId, name: x.name, batchNo: consumables.find((c) => c._id === x.inventoryId)?.batchNo, qty: x.qty, unit: x.unit, rate: x.rate, billable: x.billable })),
         wastage: waste.map((w) => ({ inventoryId: items.find((x) => x.name === w.name)?.inventoryId, name: w.name, qty: w.qty, reason: w.reason })),
         serviceFee, productTotal, discount, total, grading, notes: notes.trim(), therapist: admin?.name ?? "",
       };
-      if (outManual) {
-        await api.bookings.manualCheckOut(bk._id, outReason.trim(), session);
-      } else {
-        await api.bookings.verifyCheckOut(bk._id, outCode, undefined, session);
-      }
+      await api.bookings.complete(bk._id, { session });
       setOutOpen(false);
 
       audit("BOOKING_CHECKED_OUT",
-        `${bk.fullName} · ${usedLine.length} item${usedLine.length === 1 ? "" : "s"} logged · ${fmtINR(total)}${outManual ? " · manual" : ""}`,
+        `${bk.fullName} · ${usedLine.length} item${usedLine.length === 1 ? "" : "s"} logged · ${fmtINR(total)}`,
         { bookingId: bk._id });
       toast("Sent to front desk — reception sees the bill now");
 
@@ -667,38 +632,21 @@ export function Session() {
         </div>
       </TabletFrame>
 
-      {/* check-out — same code-gated flow as reception */}
-      <Modal open={outOpen} onClose={() => !busy && setOutOpen(false)} title={`Check out ${bk.fullName} — guest code`}>
-        {!outManual ? (
-          <>
-            <Note>Ask the guest for the 6-digit check-out code on their Zennara appointment screen — it appears once the session is in progress.</Note>
-            <div className="mt-3"><Otp value={outCode} onChange={setOutCode} length={6} /></div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
-              <span className="text-ink3">Resend code:</span>
-              <Btn kind="ghost" className="!px-2.5 !py-1 !text-[11.5px]" disabled={sendBusy} onClick={() => sendOutCode("email")}>Email</Btn>
-              <Btn kind="ghost" className="!px-2.5 !py-1 !text-[11.5px]" disabled={sendBusy} onClick={() => sendOutCode("whatsapp")}>WhatsApp</Btn>
-              <button className="ml-auto text-[11.5px] font-semibold text-ink3 underline-offset-2 hover:underline"
-                onClick={() => { setOutManual(true); setErr(null); }}>
-                Guest can&rsquo;t receive a code?
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <Note kind="crit">Manual check-out is recorded against your name on the booking and in the audit log — the guest is notified they were checked out without a code.</Note>
-            <div className="mt-3">
-              <Area label="Reason (required)" value={outReason} onChange={setOutReason} rows={2}
-                placeholder="e.g. Guest left phone in the locker" />
-            </div>
-            <button className="mt-2 text-[11.5px] font-semibold text-ink3 underline-offset-2 hover:underline"
-              onClick={() => { setOutManual(false); setErr(null); }}>← Back to code entry</button>
-          </>
-        )}
+      {/* complete — one confirmation, with the bill the desk will see */}
+      <Modal open={outOpen} onClose={() => !busy && setOutOpen(false)} title={`Complete ${bk.fullName}'s session`}>
+        <Note>This closes the service in Zenoti, takes the consumables off stock and sends the bill below to reception.
+          Reception can reopen a visit completed today if something needs changing.</Note>
+        <div className="mt-3 grid gap-1 rounded-lg bg-ivory px-3 py-2.5 text-[12.5px]">
+          <div className="flex justify-between"><span className="text-ink3">Products</span><b>{fmtINR(productTotal)}</b></div>
+          <div className="flex justify-between"><span className="text-ink3">Service fee</span><b>{fmtINR(serviceFee)}</b></div>
+          {discount > 0 && <div className="flex justify-between"><span className="text-ink3">Discount</span><b>−{fmtINR(discount)}</b></div>}
+          <div className="mt-1 flex justify-between border-t border-border pt-1.5 text-[13.5px]"><b>Total</b><b>{fmtINR(total)}</b></div>
+        </div>
         {err && <Note kind="crit" className="mt-3">{err}</Note>}
         <div className="mt-4 flex justify-end gap-2">
           <Btn kind="ghost" disabled={busy} onClick={() => setOutOpen(false)}>Back</Btn>
-          <Btn kind="gold" disabled={busy || (outManual ? outReason.trim().length < 3 : outCode.length !== 6)} onClick={finishSession}>
-            {busy ? "Completing…" : outManual ? "Complete without code" : "Complete & check out"}
+          <Btn kind="gold" disabled={busy} onClick={finishSession}>
+            {busy ? "Completing…" : "Complete session"}
           </Btn>
         </div>
       </Modal>
