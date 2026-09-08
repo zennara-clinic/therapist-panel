@@ -1,3 +1,4 @@
+import { AlertTriangle, Check } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -488,7 +489,7 @@ export function Session() {
             </div>
             <div className="mt-1 text-[16px] font-bold">{bookingServiceName(bk, "Treatment")}</div>
             {flags.length > 0 && (
-              <div className="mt-0.5 text-[11.5px] font-semibold text-err">⚠ {flags.join(" · ")}</div>
+              <div className="mt-0.5 flex items-center gap-1.5 text-[11.5px] font-semibold text-err"><AlertTriangle size={12} className="shrink-0" />{flags.join(" · ")}</div>
             )}
             {bk.notes && <div className="mt-0.5 text-[11.5px] text-ink3">{bk.notes}</div>}
           </div>
@@ -729,7 +730,7 @@ export function Summary() {
       <TabletFrame>
         <div className="p-4">
           <div className="px-0 py-4 text-center">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-ok-bg text-[26px] text-ok">✓</div>
+            <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-ok-bg text-ok"><Check size={26} strokeWidth={2.5} /></div>
             <div className="mt-3 text-[17px] font-extrabold">Sent to the front desk</div>
             <div className="mt-1 text-[12.5px] text-ink3">
               {booking.data?.fullName ?? "The guest"} can head to reception — stock has been updated and the session is
